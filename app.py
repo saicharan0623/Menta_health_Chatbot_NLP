@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Mental Health Chatbot",
+    page_title="Mental Health Guardian",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -159,6 +159,18 @@ def get_supportive_response(keywords: list) -> str:
     return f"Your mental health matters. Professional support tailored to your situation can help. Consider connecting with a mental health professional."
 
 # --- Core Chatbot Logic ---
+def clean_text(text: str) -> str:
+    """Cleans formatting issues from text."""
+    if not text:
+        return text
+    text = text.replace('/p>', '')
+    text = text.replace('<p>', '')
+    text = text.replace('<p', '')
+    text = text.replace('</p>', '')
+    text = text.replace('&nbsp;', ' ')
+    text = text.strip()
+    return text
+
 def get_response(user_query: str, df: Optional[pd.DataFrame], model: SentenceTransformer, 
                  embeddings: Optional[np.ndarray], threshold: float = 0.40) -> Tuple[str, float, Optional[str]]:
     """Generates a response with intelligent matching."""
@@ -190,6 +202,7 @@ def get_response(user_query: str, df: Optional[pd.DataFrame], model: SentenceTra
             if best_similarity >= threshold:
                 matched_q = df['Questions'].iloc[best_match_idx]
                 answer = df['Answers'].iloc[best_match_idx]
+                answer = clean_text(answer)
                 intro = f"Based on your question about '{matched_q.strip()}', here's helpful information:\n\n"
                 outro = "\n\nDisclaimer: This is for informational purposes only. Please consult a professional for personalized advice."
                 return intro + answer + outro, best_similarity, "FAQ Database"
@@ -273,7 +286,7 @@ def render_sidebar():
 def main():
     render_sidebar()
     
-    st.title("Mental Health Guardian")
+    st.title("Mental Health Chatbot")
     st.markdown("Your AI companion for mental health support and information")
 
     model = load_model()
