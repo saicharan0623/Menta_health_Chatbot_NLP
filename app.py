@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import pickle
 from datetime import datetime
 import time
-import textwrap
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import Tuple, Optional
@@ -13,12 +13,12 @@ warnings.filterwarnings('ignore')
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Mental Health Guardian Pro",
+    page_title="Mental Health Chatbot",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- Advanced Dark Theme & Custom CSS ---
+# --- Dark Theme & Custom CSS ---
 st.markdown("""
 <style>
     .stApp {
@@ -86,24 +86,24 @@ def load_data():
     try:
         return pd.read_csv('cleaned_mental_health_faq.csv')
     except Exception as e:
-        st.warning(f"FAQ database not found: {e}. AI will generate responses.")
+        st.warning(f"FAQ database not found.")
         return None
 
-def compute_embeddings_runtime(_model, df):
-    """Computes embeddings at runtime without caching."""
-    if df is None or len(df) == 0 or _model is None:
-        return np.array([])
-    
+@st.cache_resource
+def load_embeddings():
+    """Loads pre-computed embeddings from pickle file."""
     try:
-        questions = df['Questions'].tolist() if 'Questions' in df.columns else []
-        if len(questions) == 0:
-            return np.array([])
-        
-        embeddings = _model.encode(questions, show_progress_bar=False)
+        with open('question_embeddings.npy', 'rb') as f:
+            embeddings = np.load(f)
         return embeddings
     except Exception as e:
-        st.warning(f"Could not compute embeddings: {e}")
-        return np.array([])
+        try:
+            with open('tfidf_vectorizer.pkl', 'rb') as f:
+                embeddings = pickle.load(f)
+            return embeddings
+        except:
+            st.warning(f"Embeddings file not found.")
+            return None
 
 @st.cache_resource
 def get_spell_checker():
@@ -133,39 +133,38 @@ def extract_keywords(text: str) -> list:
             keywords.append(term)
     return keywords
 
-def get_supportive_default_response(keywords: list) -> str:
-    """Provides a supportive default response based on keywords."""
+def get_supportive_response(keywords: list) -> str:
+    """Provides a supportive response based on keywords."""
     topic = ', '.join(keywords) if keywords else 'mental health'
     responses = {
-        'anxiety': "Anxiety is a common experience that many people face. It's important to remember that anxiety can be managed through various techniques such as deep breathing, mindfulness, exercise, and professional support. If you're struggling, reaching out to a mental health professional can provide personalized strategies.",
-        'depression': "Depression is a serious mental health condition that deserves proper attention. Many people find relief through therapy, medication, lifestyle changes, and support from loved ones. If you're experiencing depression, please reach out to a healthcare provider or mental health professional.",
-        'stress': "Stress is a natural part of life, but managing it effectively is important. Strategies like exercise, meditation, time management, and talking to someone you trust can help. Remember to prioritize self-care and reach out for professional help if stress becomes overwhelming.",
-        'sleep': "Good sleep is crucial for mental and physical health. Establishing a consistent sleep schedule, creating a relaxing bedtime routine, and maintaining a comfortable sleep environment can improve sleep quality. If sleep problems persist, consult a healthcare professional.",
-        'trauma': "Trauma can have lasting effects on mental health. Professional support through trauma-focused therapy is often very effective. If you're dealing with trauma, consider reaching out to a trauma specialist or counselor who can help you process and heal.",
-        'panic': "Panic attacks can feel overwhelming, but they are manageable. Techniques like controlled breathing, grounding exercises, and professional therapy can help. It's important to seek support from a mental health professional if panic attacks are affecting your life.",
-        'meditation': "Meditation is a powerful tool for mental wellness. Regular practice can reduce anxiety, improve focus, and enhance overall well-being. Start with just a few minutes daily and gradually increase your practice.",
-        'relationships': "Healthy relationships are important for mental health. Communication, boundaries, and mutual respect are key. If you're facing relationship challenges, talking to a counselor or therapist can provide valuable insights and strategies.",
-        'loneliness': "Loneliness can impact mental health, but there are ways to address it. Connecting with others through activities, communities, or professional support can help. Remember that reaching out is a sign of strength.",
-        'burnout': "Burnout is a state of physical and emotional exhaustion. Recovery involves setting boundaries, taking breaks, pursuing hobbies, and seeking support. Don't hesitate to talk to a professional about effective recovery strategies.",
-        'fear': "Fear is a normal emotion, but when it becomes overwhelming, it's important to address it. Techniques like gradual exposure, cognitive behavioral therapy, and relaxation methods can help. Professional support is available if fear is limiting your life.",
-        'ocd': "Obsessive-Compulsive Disorder involves intrusive thoughts and repetitive behaviors. Evidence-based treatments like Cognitive Behavioral Therapy and medication can be very effective. If you suspect you have OCD, consult with a mental health professional.",
-        'adhd': "Attention-Deficit/Hyperactivity Disorder can be managed through various approaches including therapy, medication, and lifestyle modifications. A healthcare provider can help determine the best treatment plan for your specific situation.",
+        'anxiety': "Anxiety is common and manageable. Deep breathing, mindfulness, exercise, and professional support can help. Consider reaching out to a mental health professional for personalized strategies.",
+        'depression': "Depression is serious and treatable. Therapy, medication, lifestyle changes, and support from loved ones can help. Please reach out to a healthcare provider.",
+        'stress': "Stress management involves exercise, meditation, time management, and talking to trusted people. Prioritize self-care and seek professional help if stress becomes overwhelming.",
+        'sleep': "Good sleep is important for mental health. A consistent sleep schedule, relaxing bedtime routine, and comfortable environment help. Consult a healthcare professional if problems persist.",
+        'trauma': "Trauma-focused therapy is very effective. Consider reaching out to a trauma specialist who can help you process and heal.",
+        'panic': "Panic attacks are manageable with controlled breathing, grounding exercises, and professional therapy. Seek support from a mental health professional.",
+        'meditation': "Meditation reduces anxiety and improves focus. Start with a few minutes daily and gradually increase your practice.",
+        'relationships': "Healthy relationships need communication, boundaries, and respect. A counselor can help with relationship challenges.",
+        'loneliness': "Connection through activities, communities, or professional support helps. Reaching out is a sign of strength.",
+        'burnout': "Burnout recovery involves boundaries, breaks, hobbies, and support. Talk to a professional about recovery strategies.",
+        'fear': "Fear is normal. Gradual exposure, cognitive behavioral therapy, and relaxation methods help. Professional support is available.",
+        'ocd': "Obsessive-Compulsive Disorder responds well to Cognitive Behavioral Therapy and medication. Consult a mental health professional.",
+        'adhd': "ADHD can be managed through therapy, medication, and lifestyle modifications. A healthcare provider can help determine the best approach.",
     }
     
     for key, response in responses.items():
         if key in topic.lower():
             return response
     
-    return f"Thank you for reaching out about {topic}. Your mental health and well-being are important. Professional support tailored to your specific situation can be incredibly helpful. Consider connecting with a mental health professional who can provide personalized guidance."
+    return f"Your mental health matters. Professional support tailored to your situation can help. Consider connecting with a mental health professional."
 
 # --- Core Chatbot Logic ---
 def get_response(user_query: str, df: Optional[pd.DataFrame], model: SentenceTransformer, 
-                 embeddings: np.ndarray, threshold: float = 0.40) -> Tuple[str, float, Optional[str]]:
+                 embeddings: Optional[np.ndarray], threshold: float = 0.40) -> Tuple[str, float, Optional[str]]:
     """Generates a response with intelligent matching."""
     if not user_query or user_query.isspace():
         return "Please share what's on your mind. I'm here to help.", 0.0, None
 
-    # Handle Greetings and Farewells
     normalized_query = user_query.lower().strip()
     greetings = ['hi', 'hello', 'hey', 'greetings', 'howdy', 'hiya', 'hi there']
     farewells = ['bye', 'goodbye', 'see you', 'take care', 'see ya', 'farewell', 'bye bye']
@@ -173,20 +172,16 @@ def get_response(user_query: str, df: Optional[pd.DataFrame], model: SentenceTra
     if normalized_query in greetings:
         return "Hello! I'm your Mental Health Guardian. What would you like to know about today?", 1.0, "Greeting"
     if normalized_query in farewells:
-        return "Take care of yourself! Remember, seeking help is a sign of strength. Feel free to reach out anytime.", 1.0, "Farewell"
+        return "Take care of yourself. Seeking help is a sign of strength. Feel free to reach out anytime.", 1.0, "Farewell"
 
-    # Spell Correction
     spell_checker = get_spell_checker()
     corrected_query = correct_spelling(normalized_query, spell_checker)
-    
-    # Extract keywords
     keywords = extract_keywords(corrected_query)
 
-    # Find Best Match using Embeddings
     query_embedding = model.encode([corrected_query])
     
     # Try FAQ matching if we have data and embeddings
-    if df is not None and len(embeddings) > 0 and embeddings.shape[0] > 0:
+    if df is not None and embeddings is not None and len(embeddings) > 0 and embeddings.shape[0] > 0:
         try:
             similarities = cosine_similarity(query_embedding, embeddings).flatten()
             best_match_idx = similarities.argmax()
@@ -201,9 +196,9 @@ def get_response(user_query: str, df: Optional[pd.DataFrame], model: SentenceTra
         except Exception as e:
             pass
     
-    # Fallback: Supportive Default Response
-    default_response = get_supportive_default_response(keywords)
-    return default_response, 0.65, "Knowledge Base"
+    # Fallback: Supportive Response
+    response = get_supportive_response(keywords)
+    return response, 0.65, "Knowledge Base"
 
 def stream_response(text: str):
     """Yields words to simulate a typing effect."""
@@ -211,16 +206,16 @@ def stream_response(text: str):
         yield word + " "
         time.sleep(0.03)
 
-# --- Sidebar with Details ---
+# --- Sidebar ---
 def render_sidebar():
     """Renders the sidebar with app information and resources."""
     with st.sidebar:
-        st.markdown("## Mental Health Guardian Pro")
+        st.markdown("## Mental Health Guardian")
         
         st.markdown("---")
-        st.markdown("### About This App")
+        st.markdown("### About")
         st.markdown("""
-        This AI-powered chatbot provides:
+        This AI chatbot provides:
         - Information on mental health topics
         - Support and coping strategies
         - Resources and guidance
@@ -231,13 +226,10 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Crisis Resources")
         st.markdown("""
-        If you're in crisis, please reach out:
+        If you're in crisis:
         
         **National Suicide Prevention Lifeline**
         - Phone: 1-800-273-8255
-        - Text: HOME to 741741
-        
-        **Crisis Text Line**
         - Text: HOME to 741741
         
         **International**
@@ -247,21 +239,21 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### How to Use")
         st.markdown("""
-        1. Ask freely - Share your concerns
-        2. Get info - Receive helpful information
-        3. Take action - Use resources provided
-        4. Seek help - Contact professionals when needed
+        1. Ask freely about your concerns
+        2. Get helpful information
+        3. Use resources provided
+        4. Seek professional help when needed
         
         Tips:
         - Be specific about your concerns
-        - The more detail, the better the response
+        - More detail helps better responses
         - Ask follow-up questions anytime
         """)
         
         st.markdown("---")
-        st.markdown("### Topics I Can Help With")
-        topics = ["Anxiety", "Depression", "Stress", "Sleep Issues", "Trauma", "Relationships", 
-                 "Burnout", "Self-Care", "Meditation", "Coping Skills", "Work-Life Balance", "Grief"]
+        st.markdown("### Topics")
+        topics = ["Anxiety", "Depression", "Stress", "Sleep", "Trauma", "Relationships", 
+                 "Burnout", "Self-Care", "Meditation", "Coping", "Work-Life Balance", "Grief"]
         
         col1, col2 = st.columns(2)
         for i, topic in enumerate(topics):
@@ -269,16 +261,6 @@ def render_sidebar():
                 col1.markdown(f"- {topic}")
             else:
                 col2.markdown(f"- {topic}")
-        
-        st.markdown("---")
-        st.markdown("### App Details")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Model Type", "Advanced AI")
-            st.metric("Response Mode", "Dynamic")
-        with col2:
-            st.metric("Language", "English")
-            st.metric("Version", "2.1 Pro")
         
         st.markdown("---")
         st.markdown("""
@@ -291,24 +273,21 @@ def render_sidebar():
 def main():
     render_sidebar()
     
-    st.title("Mental Health Guardian Pro")
+    st.title("Mental Health Guardian")
     st.markdown("Your AI companion for mental health support and information")
 
     model = load_model()
-
     if model is None:
-        st.error("Advanced models failed to load. Please check dependencies.")
+        st.error("Models failed to load. Please check dependencies.")
         st.stop()
 
     df = load_data()
-    
-    # Compute embeddings at runtime without caching
-    embeddings = compute_embeddings_runtime(model, df) if df is not None else np.array([])
+    embeddings = load_embeddings()
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [{
             "role": "assistant",
-            "content": "Welcome! I'm your Mental Health Guardian Pro. I'm here to provide information, support, and guidance on mental health topics. How can I help you today?",
+            "content": "Welcome! I'm your Mental Health Guardian. I'm here to provide information, support, and guidance on mental health topics. How can I help you today?",
             "timestamp": datetime.now()
         }]
 
@@ -366,7 +345,6 @@ def main():
             
             streamed_message = st.write_stream(stream_response(response))
             
-            # Show confidence badge
             if confidence > 0:
                 st.markdown(f"""
                 <div class="confidence-badge">
